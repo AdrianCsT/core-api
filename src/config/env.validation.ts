@@ -1,0 +1,69 @@
+import { plainToInstance } from 'class-transformer';
+import { IsEnum, IsNumber, IsString, IsUrl, Max, Min, validateSync } from 'class-validator';
+
+enum NodeEnvironment {
+  Development = 'development',
+  Production = 'production',
+  Test = 'test',
+}
+
+class EnvironmentVariables {
+  @IsEnum(NodeEnvironment)
+  NODE_ENV: NodeEnvironment = NodeEnvironment.Development;
+
+  @IsNumber()
+  @Min(1)
+  @Max(65535)
+  PORT: number = 3000;
+
+  @IsString()
+  DATABASE_URL!: string;
+
+  @IsString()
+  JWT_ACCESS_SECRET!: string;
+
+  @IsString()
+  JWT_ACCESS_EXPIRES_IN!: string;
+
+  @IsString()
+  JWT_REFRESH_SECRET!: string;
+
+  @IsString()
+  JWT_REFRESH_EXPIRES_IN!: string;
+
+  @IsNumber()
+  @Min(60)
+  PASSWORD_RESET_TOKEN_TTL!: number;
+
+  @IsString()
+  MAIL_HOST!: string;
+
+  @IsNumber()
+  MAIL_PORT!: number;
+
+  @IsString()
+  MAIL_USER!: string;
+
+  @IsString()
+  MAIL_PASS!: string;
+
+  @IsString()
+  MAIL_FROM!: string;
+
+  @IsUrl({ require_tld: false })
+  FRONTEND_URL!: string;
+}
+
+export function validateEnv(config: Record<string, unknown>) {
+  const validated = plainToInstance(EnvironmentVariables, config, {
+    enableImplicitConversion: true,
+  });
+
+  const errors = validateSync(validated, { skipMissingProperties: false });
+
+  if (errors.length > 0) {
+    throw new Error(`Config validation error: ${errors.toString()}`);
+  }
+
+  return validated;
+}
