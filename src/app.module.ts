@@ -36,7 +36,8 @@ import { UsersModule } from '@/users';
   providers: [
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    ThrottlerGuard,
+    { provide: APP_GUARD, useExisting: ThrottlerGuard },
     AppService,
   ],
 })

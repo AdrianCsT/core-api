@@ -65,7 +65,7 @@ describe('JwtRefreshStrategy', () => {
       const result = await strategy.validate(mockRequest as Request, payload);
 
       expect(mockPrismaService.token.findUnique).toHaveBeenCalledWith({
-        where: { token: 'raw-refresh-token' },
+        where: { token: payload.tokenId },
         select: {
           id: true,
           usedAt: true,

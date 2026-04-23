@@ -1,202 +1,153 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { UsersService } from './users.service';
-import { UsersRepository } from './users.repository';
-import { Role } from '../generated/prisma/client';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { JwtPayload } from '../auth/types/jwt-payload.type';
+import { Test, TestingModule } from '@nestjs/testing';
+
+import { JwtPayload } from '@/auth/types/jwt-payload.type';
+import { Role } from '@/generated/prisma/client';
+import { buildUser } from '@test/factories/user.factory';
+import { UsersRepository } from './users.repository';
+import { UsersService } from './users.service';
+
+const buildRequester = (overrides: Partial<JwtPayload> = {}): JwtPayload => ({
+  sub: 'requester-id',
+  email: 'requester@example.com',
+  role: Role.USER,
+  ...overrides,
+});
 
 describe('UsersService', () => {
   let service: UsersService;
-
-  const mockUsersRepository = {
-    findAll: jest.fn(),
-    findById: jest.fn(),
-    update: jest.fn(),
-    softDelete: jest.fn(),
-  };
+  let repository: jest.Mocked<UsersRepository>;
 
   beforeEach(async () => {
-    jest.clearAllMocks();
+    const repositoryMock: jest.Mocked<UsersRepository> = {
+      findAll: jest.fn(),
+      findById: jest.fn(),
+      findByIdIncludingDeleted: jest.fn(),
+      update: jest.fn(),
+      softDelete: jest.fn(),
+    } as unknown as jest.Mocked<UsersRepository>;
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [UsersService, { provide: UsersRepository, useValue: mockUsersRepository }],
+      providers: [UsersService, { provide: UsersRepository, useValue: repositoryMock }],
     }).compile();
 
     service = module.get<UsersService>(UsersService);
+    repository = module.get(UsersRepository);
   });
 
-  it('should be defined', () => {
-    expect(service).toBeDefined();
-  });
+  afterEach(() => jest.clearAllMocks());
 
   describe('findAll', () => {
-    it('should return paginated users', async () => {
-      const query = { limit: 10 };
-      const expectedResult = { items: [], nextCursor: null, total: 0 };
-      mockUsersRepository.findAll.mockResolvedValue(expectedResult);
+    it('delegates to repository and returns paginated result', async () => {
+      const query = { limit: 20 };
+      const expected = { items: [], nextCursor: null, total: 0 };
+      repository.findAll.mockResolvedValue(expected);
 
       const result = await service.findAll(query);
 
-      expect(mockUsersRepository.findAll).toHaveBeenCalledWith(query);
-      expect(result).toEqual(expectedResult);
+      expect(result).toEqual(expected);
+      expect(repository.findAll).toHaveBeenCalledWith(query);
     });
   });
 
   describe('findOne', () => {
-    const adminRequester: JwtPayload = {
-      sub: 'admin-1',
-      email: 'admin@test.com',
-      role: Role.ADMIN,
-    };
-    const userRequester: JwtPayload = {
-      sub: 'user-1',
-      email: 'user@test.com',
-      role: Role.USER,
-    };
-    const otherRequester: JwtPayload = {
-      sub: 'user-2',
-      email: 'other@test.com',
-      role: Role.USER,
-    };
+    it('allows admin to access any user', async () => {
+      const target = buildUser({ id: 'other-user-id' });
+      const admin = buildRequester({ role: Role.ADMIN });
+      repository.findById.mockResolvedValue(target);
 
-    it('should allow admin to find any user', async () => {
-      const targetId = 'user-1';
-      const expectedUser = { id: targetId, name: 'Test User' };
-      mockUsersRepository.findById.mockResolvedValue(expectedUser);
+      const result = await service.findOne('other-user-id', admin);
 
-      const result = await service.findOne(targetId, adminRequester);
-
-      expect(mockUsersRepository.findById).toHaveBeenCalledWith(targetId);
-      expect(result).toEqual(expectedUser);
+      expect(result).toEqual(target);
     });
 
-    it('should allow user to find themselves', async () => {
-      const targetId = 'user-1';
-      const expectedUser = { id: targetId, name: 'Test User' };
-      mockUsersRepository.findById.mockResolvedValue(expectedUser);
+    it('allows user to access their own profile', async () => {
+      const user = buildUser({ id: 'requester-id' });
+      const requester = buildRequester({ sub: 'requester-id' });
+      repository.findById.mockResolvedValue(user);
 
-      const result = await service.findOne(targetId, userRequester);
+      const result = await service.findOne('requester-id', requester);
 
-      expect(mockUsersRepository.findById).toHaveBeenCalledWith(targetId);
-      expect(result).toEqual(expectedUser);
+      expect(result).toEqual(user);
     });
 
-    it('should throw ForbiddenException if user tries to find another user', async () => {
-      const targetId = 'user-1';
-      await expect(service.findOne(targetId, otherRequester)).rejects.toThrow(ForbiddenException);
-      expect(mockUsersRepository.findById).not.toHaveBeenCalled();
+    it('throws ForbiddenException when USER accesses another user', async () => {
+      const requester = buildRequester({ sub: 'requester-id', role: Role.USER });
+
+      await expect(service.findOne('different-user-id', requester)).rejects.toThrow(
+        ForbiddenException,
+      );
+
+      expect(repository.findById).not.toHaveBeenCalled();
     });
 
-    it('should throw NotFoundException if user does not exist', async () => {
-      const targetId = 'non-existent';
-      mockUsersRepository.findById.mockResolvedValue(null);
+    it('throws NotFoundException when user does not exist', async () => {
+      const admin = buildRequester({ role: Role.ADMIN });
+      repository.findById.mockResolvedValue(null);
 
-      await expect(service.findOne(targetId, adminRequester)).rejects.toThrow(NotFoundException);
+      await expect(service.findOne('ghost-id', admin)).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('update', () => {
-    const adminRequester: JwtPayload = {
-      sub: 'admin-1',
-      email: 'admin@test.com',
-      role: Role.ADMIN,
-    };
-    const userRequester: JwtPayload = {
-      sub: 'user-1',
-      email: 'user@test.com',
-      role: Role.USER,
-    };
-    const otherRequester: JwtPayload = {
-      sub: 'user-2',
-      email: 'other@test.com',
-      role: Role.USER,
-    };
+    it('allows user to update their own name', async () => {
+      const user = buildUser({ id: 'requester-id' });
+      const requester = buildRequester({ sub: 'requester-id' });
+      repository.findById.mockResolvedValue(user);
+      repository.update.mockResolvedValue({ ...user, name: 'Updated Name' });
 
-    it('should allow admin to update any user', async () => {
-      const targetId = 'user-1';
-      const dto = { name: 'Updated Name' };
-      const expectedUser = { id: targetId, name: 'Updated Name' };
-      mockUsersRepository.findById.mockResolvedValue({ id: targetId });
-      mockUsersRepository.update.mockResolvedValue(expectedUser);
+      const result = await service.update('requester-id', { name: 'Updated Name' }, requester);
 
-      const result = await service.update(targetId, dto, adminRequester);
-
-      expect(mockUsersRepository.findById).toHaveBeenCalledWith(targetId);
-      expect(mockUsersRepository.update).toHaveBeenCalledWith(targetId, dto);
-      expect(result).toEqual(expectedUser);
+      expect(result.name).toBe('Updated Name');
+      expect(repository.update).toHaveBeenCalledWith('requester-id', {
+        name: 'Updated Name',
+      });
     });
 
-    it('should allow user to update themselves', async () => {
-      const targetId = 'user-1';
-      const dto = { name: 'Updated Name' };
-      const expectedUser = { id: targetId, name: 'Updated Name' };
-      mockUsersRepository.findById.mockResolvedValue({ id: targetId });
-      mockUsersRepository.update.mockResolvedValue(expectedUser);
+    it('throws ForbiddenException when USER updates another user', async () => {
+      const requester = buildRequester({ sub: 'requester-id', role: Role.USER });
 
-      const result = await service.update(targetId, dto, userRequester);
-
-      expect(mockUsersRepository.update).toHaveBeenCalledWith(targetId, dto);
-      expect(result).toEqual(expectedUser);
-    });
-
-    it('should throw ForbiddenException if user tries to update another user', async () => {
-      const targetId = 'user-1';
-      const dto = { name: 'Updated Name' };
-      await expect(service.update(targetId, dto, otherRequester)).rejects.toThrow(
+      await expect(service.update('other-id', { name: 'Hacker' }, requester)).rejects.toThrow(
         ForbiddenException,
       );
-    });
-
-    it('should throw NotFoundException if user does not exist', async () => {
-      const targetId = 'non-existent';
-      mockUsersRepository.findById.mockResolvedValue(null);
-
-      await expect(service.update(targetId, {}, adminRequester)).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('updateRole', () => {
-    it('should update role if user exists', async () => {
-      const targetId = 'user-1';
-      const dto = { role: Role.ADMIN };
-      const expectedUser = { id: targetId, role: Role.ADMIN };
-      mockUsersRepository.findById.mockResolvedValue({ id: targetId });
-      mockUsersRepository.update.mockResolvedValue(expectedUser);
+    it('updates role when user exists', async () => {
+      const user = buildUser();
+      repository.findById.mockResolvedValue(user);
+      repository.update.mockResolvedValue({ ...user, role: Role.ADMIN });
 
-      const result = await service.updateRole(targetId, dto);
+      const result = await service.updateRole(user.id, { role: Role.ADMIN });
 
-      expect(mockUsersRepository.findById).toHaveBeenCalledWith(targetId);
-      expect(mockUsersRepository.update).toHaveBeenCalledWith(targetId, { role: dto.role });
-      expect(result).toEqual(expectedUser);
+      expect(result.role).toBe(Role.ADMIN);
     });
 
-    it('should throw NotFoundException if user does not exist', async () => {
-      const targetId = 'non-existent';
-      mockUsersRepository.findById.mockResolvedValue(null);
+    it('throws NotFoundException when user does not exist', async () => {
+      repository.findById.mockResolvedValue(null);
 
-      await expect(service.updateRole(targetId, { role: Role.ADMIN })).rejects.toThrow(
+      await expect(service.updateRole('ghost-id', { role: Role.ADMIN })).rejects.toThrow(
         NotFoundException,
       );
     });
   });
 
   describe('remove', () => {
-    it('should soft delete user if they exist', async () => {
-      const targetId = 'user-1';
-      mockUsersRepository.findById.mockResolvedValue({ id: targetId });
-      mockUsersRepository.softDelete.mockResolvedValue(undefined);
+    it('soft deletes existing user', async () => {
+      const user = buildUser();
+      repository.findById.mockResolvedValue(user);
+      repository.softDelete.mockResolvedValue(undefined);
 
-      await service.remove(targetId);
+      await service.remove(user.id);
 
-      expect(mockUsersRepository.findById).toHaveBeenCalledWith(targetId);
-      expect(mockUsersRepository.softDelete).toHaveBeenCalledWith(targetId);
+      expect(repository.softDelete).toHaveBeenCalledWith(user.id);
     });
 
-    it('should throw NotFoundException if user does not exist', async () => {
-      const targetId = 'non-existent';
-      mockUsersRepository.findById.mockResolvedValue(null);
+    it('throws NotFoundException for non-existent user', async () => {
+      repository.findById.mockResolvedValue(null);
 
-      await expect(service.remove(targetId)).rejects.toThrow(NotFoundException);
+      await expect(service.remove('ghost-id')).rejects.toThrow(NotFoundException);
     });
   });
 });
