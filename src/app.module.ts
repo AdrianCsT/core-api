@@ -11,7 +11,8 @@ import { AllExceptionsFilter } from '@/common/filters/http-exception.filter';
 import { TransformInterceptor } from '@/common/interceptors/transform.interceptor';
 import { appConfig, jwtConfig, mailConfig, validateEnv } from '@/config';
 import { PrismaModule } from '@/prisma';
-import { AuthModule } from './auth/auth.module';
+import { AuthModule } from '@/auth';
+import { UsersModule } from '@/users';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { AuthModule } from './auth/auth.module';
       ],
     }),
     PrismaModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [
