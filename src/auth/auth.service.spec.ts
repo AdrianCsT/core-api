@@ -6,12 +6,12 @@ import { AuthService } from './auth.service';
 import { TwoFactorService } from './two-factor.service';
 import { TokenService } from './services/token.service';
 import { HashingService } from './services/hashing.service';
-import { PrismaService } from '@/prisma';
+
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '@/mail';
+import { AuthRepository } from './auth.repository';
 
-import { buildPrismaMock, PrismaMock } from '@test/mocks/prisma.mock';
 import { buildJwtServiceMock } from '@test/mocks/jwt.mock';
 import { buildMailServiceMock } from '@test/mocks/mail.mock';
 import { buildConfigServiceMock } from '@test/mocks/config.mock';
@@ -42,17 +42,24 @@ const mockTokenService = {
   clearRefreshCookie: jest.fn(),
 };
 
+const mockAuthRepository = {
+  findUserByEmail: jest.fn(),
+  findUserById: jest.fn(),
+  createUser: jest.fn(),
+  deleteTokenById: jest.fn(),
+};
+
 describe('AuthService', () => {
   let service: AuthService;
-  let prisma: PrismaMock;
+  let authRepository: typeof mockAuthRepository;
 
   beforeEach(async () => {
-    prisma = buildPrismaMock();
+    authRepository = mockAuthRepository;
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
-        { provide: PrismaService, useValue: prisma },
+        { provide: AuthRepository, useValue: authRepository },
         { provide: JwtService, useValue: buildJwtServiceMock() },
         { provide: ConfigService, useValue: buildConfigServiceMock() },
         { provide: MailService, useValue: buildMailServiceMock() },
@@ -69,7 +76,7 @@ describe('AuthService', () => {
 
   describe('register', () => {
     it('throws ConflictException when email already exists', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'existing-id' });
+      authRepository.findUserByEmail.mockResolvedValue({ id: 'existing-id' });
 
       await expect(
         service.register({ name: 'John', email: 'taken@example.com', password: 'P@ssw0rd!' }),
@@ -78,8 +85,8 @@ describe('AuthService', () => {
 
     it('creates user and returns safe fields', async () => {
       const user = buildUser();
-      prisma.user.findUnique.mockResolvedValue(null);
-      prisma.user.create.mockResolvedValue({
+      authRepository.findUserByEmail.mockResolvedValue(null);
+      authRepository.createUser.mockResolvedValue({
         id: user.id,
         email: user.email,
         name: user.name,
@@ -99,12 +106,12 @@ describe('AuthService', () => {
         role: user.role,
       });
       expect(result).not.toHaveProperty('passwordHash');
-      expect(prisma.user.create).toHaveBeenCalledTimes(1);
+      expect(authRepository.createUser).toHaveBeenCalledTimes(1);
     });
 
     it('hashes password before storing', async () => {
-      prisma.user.findUnique.mockResolvedValue(null);
-      prisma.user.create.mockResolvedValue(buildUser());
+      authRepository.findUserByEmail.mockResolvedValue(null);
+      authRepository.createUser.mockResolvedValue(buildUser());
 
       await service.register({
         name: 'John',
@@ -118,7 +125,7 @@ describe('AuthService', () => {
 
   describe('login', () => {
     it('throws UnauthorizedException for unknown email', async () => {
-      prisma.user.findUnique.mockResolvedValue(null);
+      authRepository.findUserByEmail.mockResolvedValue(null);
       const req = mockRequest();
       const res = mockResponse() as Response;
 
@@ -128,7 +135,7 @@ describe('AuthService', () => {
     });
 
     it('throws UnauthorizedException for inactive user', async () => {
-      prisma.user.findUnique.mockResolvedValue(buildUser({ isActive: false }));
+      authRepository.findUserByEmail.mockResolvedValue(buildUser({ isActive: false }));
       const req = mockRequest();
       const res = mockResponse() as Response;
 
@@ -139,7 +146,7 @@ describe('AuthService', () => {
 
     it('throws UnauthorizedException for wrong password', async () => {
       const user = buildUser({ passwordHash: 'hashed-password' });
-      prisma.user.findUnique.mockResolvedValue(user);
+      authRepository.findUserByEmail.mockResolvedValue(user);
       mockHashingService.verify.mockResolvedValueOnce(false);
       const req = mockRequest();
       const res = mockResponse() as Response;
@@ -152,7 +159,7 @@ describe('AuthService', () => {
     it('returns access_token and sets refresh cookie on success', async () => {
       const password = 'P@ssw0rd!';
       const user = buildUser({ passwordHash: 'hashed-password' });
-      prisma.user.findUnique.mockResolvedValue(user);
+      authRepository.findUserByEmail.mockResolvedValue(user);
       mockHashingService.verify.mockResolvedValueOnce(true);
       const req = mockRequest();
       const res = mockResponse() as Response;
@@ -174,14 +181,12 @@ describe('AuthService', () => {
 
   describe('logout', () => {
     it('deletes token and clears cookie', async () => {
-      prisma.token.deleteMany.mockResolvedValue({ count: 1 });
+      authRepository.deleteTokenById.mockResolvedValue({ id: 'token-id' });
       const res = mockResponse() as Response;
 
       await service.logout('token-id', res);
 
-      expect(prisma.token.deleteMany).toHaveBeenCalledWith({
-        where: { id: 'token-id' },
-      });
+      expect(authRepository.deleteTokenById).toHaveBeenCalledWith('token-id');
       expect(mockTokenService.clearRefreshCookie).toHaveBeenCalledWith(res);
     });
   });
@@ -189,7 +194,7 @@ describe('AuthService', () => {
   describe('getCurrentUser', () => {
     it('returns user without sensitive fields', async () => {
       const user = buildUser();
-      prisma.user.findUnique.mockResolvedValue({
+      authRepository.findUserById.mockResolvedValue({
         id: user.id,
         email: user.email,
         name: user.name,
@@ -211,7 +216,7 @@ describe('AuthService', () => {
     });
 
     it('throws NotFoundException when user does not exist', async () => {
-      prisma.user.findUnique.mockResolvedValue(null);
+      authRepository.findUserById.mockResolvedValue(null);
 
       await expect(service.getCurrentUser('missing-id')).rejects.toThrow(NotFoundException);
     });

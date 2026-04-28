@@ -27,6 +27,7 @@ import {
   LoginGenericResponseDto,
   NullResponseDto,
   TokensResponseDto,
+  ExchangeCodeDto,
 } from './dto';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { JwtPayload, JwtRefreshPayload, JwtRefreshPayloadWithUser } from './types/jwt-payload.type';
@@ -35,6 +36,7 @@ import { GoogleGuard } from './guards/google.guard';
 import type { OAuthUserPayload } from './types/google-profile.type';
 
 import { ConfirmPasswordDto, VerifyTwoFactorDto } from './dto';
+import { toUserDto } from './mappers/user.mapper';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -55,7 +57,7 @@ export class AuthController {
   async register(@Body() dto: RegisterDto): Promise<UserResponseDto> {
     const user = await this.authService.register(dto);
     return {
-      data: user as unknown as UserResponseDto['data'],
+      data: toUserDto(user),
       message: 'User registered successfully',
     };
   }
@@ -74,8 +76,19 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<LoginGenericResponseDto> {
     const result = await this.authService.login(dto, req, res);
+
+    if ('requires_2fa' in result) {
+      return {
+        data: result as unknown as LoginGenericResponseDto['data'],
+        message: '2FA required',
+      };
+    }
+
     return {
-      data: result as unknown as LoginGenericResponseDto['data'],
+      data: {
+        access_token: result.access_token,
+        user: toUserDto(result.user),
+      },
       message: 'Login successful',
     };
   }
@@ -146,7 +159,7 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Current user data' })
   async me(@CurrentUser() user: JwtRefreshPayload): Promise<UserResponseDto> {
     const currentUser = await this.authService.getCurrentUser(user.sub);
-    return { data: currentUser as unknown as UserResponseDto['data'] };
+    return { data: toUserDto(currentUser) };
   }
 
   // POST /api/v1/auth/session
@@ -158,8 +171,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Verify session and get fresh access token (no token rotation)' })
   @ApiResponse({ status: 200, description: 'Session verified' })
   @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
-  session(@CurrentUser() payload: JwtRefreshPayloadWithUser): TokensResponseDto {
-    const result = this.authService.verifySession(
+  async session(@CurrentUser() payload: JwtRefreshPayloadWithUser): Promise<TokensResponseDto> {
+    const result = await this.authService.verifySession(
       payload.sub,
       payload.email,
       payload.role,
@@ -187,7 +200,7 @@ export class AuthController {
     @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
-    const result = await this.authService.loginWithOAuth(oauthPayload, req, res);
+    const result = await this.authService.loginWithOAuth(oauthPayload, req);
     const frontendUrl = this.authService.getFrontendUrl();
 
     if ('requires_2fa' in result) {
@@ -198,8 +211,34 @@ export class AuthController {
       return;
     }
 
-    const params = new URLSearchParams({ access_token: result.access_token });
+    const params = new URLSearchParams({ code: result.auth_code });
     res.redirect(`${frontendUrl}/api/auth/oauth/callback?${params.toString()}`);
+  }
+
+  // POST /api/v1/auth/oauth/exchange
+  @Public()
+  @Post('oauth/exchange')
+  @Throttle({ short: { ttl: seconds(60), limit: 10 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Exchange OAuth code for tokens' })
+  @ApiResponse({
+    status: 200,
+    description: 'Code exchanged for tokens',
+    type: LoginGenericResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'Invalid or expired code' })
+  async exchangeOAuthCode(
+    @Body() dto: ExchangeCodeDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<LoginGenericResponseDto> {
+    const result = await this.authService.exchangeOAuthCode(dto.code, res);
+
+    return {
+      data: {
+        access_token: result.access_token,
+        user: toUserDto(result.user),
+      },
+    };
   }
 
   // POST /api/v1/auth/2fa/verify
@@ -220,8 +259,19 @@ export class AuthController {
       req,
       res,
     );
+
+    if ('requires_2fa' in result) {
+      return {
+        data: result as unknown as LoginGenericResponseDto['data'],
+        message: '2FA required',
+      };
+    }
+
     return {
-      data: result as unknown as LoginGenericResponseDto['data'],
+      data: {
+        access_token: result.access_token,
+        user: toUserDto(result.user),
+      },
       message: 'Login successful',
     };
   }
