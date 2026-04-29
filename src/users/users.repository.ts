@@ -43,7 +43,7 @@ export class UsersRepository {
       });
     }
 
-    if (cursorCreatedAt) {
+    if (cursorCreatedAt && cursor) {
       conditions.push({
         OR: [
           { createdAt: { lt: cursorCreatedAt } },
