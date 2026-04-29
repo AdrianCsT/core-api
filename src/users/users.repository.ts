@@ -31,14 +31,21 @@ export class UsersRepository {
       ...(cursor && { id: { lt: cursor } }),
     };
 
+    const countWhere: Prisma.UserWhereInput = {
+      deletedAt: null,
+      ...(search && {
+        OR: [{ name: { contains: search } }, { email: { contains: search } }],
+      }),
+    };
+
     const [items, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
         where,
         select: USER_SELECT,
         take: limit + 1,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { id: 'desc' },
       }),
-      this.prisma.user.count({ where }),
+      this.prisma.user.count({ where: countWhere }),
     ]);
 
     const hasNextPage = items.length > limit;
@@ -46,7 +53,7 @@ export class UsersRepository {
 
     return {
       items: page,
-      nextCursor: hasNextPage ? (page[page.length - 1]?.id ?? null) : null,
+      nextCursor: hasNextPage ? (page.at(-1)?.id ?? null) : null,
       total,
     };
   }

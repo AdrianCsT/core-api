@@ -13,7 +13,6 @@ export function parseDatabaseUrl(url: string) {
       user: decodeURIComponent(parsed.username),
       password: decodeURIComponent(parsed.password),
       database: parsed.pathname.replace('/', ''),
-      connectionString: url,
     };
   } catch {
     throw new Error(

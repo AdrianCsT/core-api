@@ -45,6 +45,9 @@ export class TokenService {
 
     const expiresAt = this.parseExpiry(refreshExpiresIn);
     const cookieMaxAge = ms(refreshExpiresIn);
+    if (cookieMaxAge === undefined) {
+      throw new Error(`Invalid refresh expiry duration: ${refreshExpiresIn}`);
+    }
 
     // Persist SHA-256 hash of the refresh token
     await this.prisma.token.create({

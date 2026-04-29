@@ -1,3 +1,5 @@
+import 'reflect-metadata';
+
 import { plainToInstance, Transform } from 'class-transformer';
 import {
   IsEnum,
@@ -45,9 +47,14 @@ class EnvironmentVariables {
   @IsString()
   JWT_REFRESH_EXPIRES_IN!: string;
 
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return 3600;
+    return Number(value);
+  })
+  @IsOptional()
   @IsNumber()
   @Min(60)
-  PASSWORD_RESET_TOKEN_TTL!: number;
+  PASSWORD_RESET_TOKEN_TTL: number = 3600;
 
   @IsString()
   MAIL_HOST!: string;
