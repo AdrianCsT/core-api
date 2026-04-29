@@ -2,17 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomUUID } from 'crypto';
-import { Response } from 'express';
-import ms from 'ms';
-import type { StringValue } from 'ms';
+import { CookieOptions, Response } from 'express';
+import ms, { type StringValue } from 'ms';
 
 import { Role, TokenType } from '@/generated/prisma/enums';
 import { PrismaService } from '@/prisma';
 import { JwtPayload, JwtRefreshPayload } from '../types/jwt-payload.type';
-
-export interface AuthTokens {
-  access_token: string;
-}
+import { AuthTokens } from '../types/auth-tokens.type';
 
 const REFRESH_COOKIE_NAME = 'refresh_token';
 
@@ -75,24 +71,34 @@ export class TokenService {
   }
 
   setRefreshCookie(res: Response, token: string, maxAge: number): void {
-    const isProd = this.configService.get<string>('app.nodeEnv') === 'production';
-
     res.cookie(REFRESH_COOKIE_NAME, token, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
-      path: '/',
+      ...this.getCookieOptions(),
       maxAge,
     });
   }
 
   clearRefreshCookie(res: Response): void {
     res.clearCookie(REFRESH_COOKIE_NAME, {
-      path: '/',
+      ...this.getCookieOptions(),
     });
   }
 
   parseExpiry(expiry: string): Date {
-    return new Date(Date.now() + ms(expiry as StringValue));
+    const milliseconds = ms(expiry as StringValue);
+    if (milliseconds === undefined) {
+      throw new Error(`Invalid expiry format: ${expiry}`);
+    }
+    return new Date(Date.now() + milliseconds);
+  }
+
+  getCookieOptions(): CookieOptions {
+    const isProd = this.configService.get<string>('app.nodeEnv') === 'production';
+
+    return {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'lax',
+      path: '/',
+    };
   }
 }

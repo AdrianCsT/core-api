@@ -11,37 +11,23 @@ import { Request, Response } from 'express';
 import type { StringValue } from 'ms';
 
 import { Role } from '@/generated/prisma/enums';
+import { AuthRepository } from './auth.repository';
 import { MailService } from '@/mail';
-import { PrismaService } from '@/prisma';
 import { LoginDto, RegisterDto } from './dto';
 import { TwoFactorService } from './two-factor.service';
 import { TokenService } from './services/token.service';
 import { HashingService } from './services/hashing.service';
 import { OAuthUserPayload } from './types/google-profile.type';
 import { JwtPayload, JwtRefreshPayload } from './types/jwt-payload.type';
+import { randomUUID } from 'crypto';
 import type { TwoFactorRequiredResponse } from './types/two-factor.types';
+import { AuthTokens } from './types/auth-tokens.type';
 
-export interface AuthTokens {
-  access_token: string;
-}
-
-export interface AuthUser {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
-  isActive?: boolean;
-  isEmailVerified?: boolean;
-  isTwoFactorEnabled?: boolean;
-  hasPassword?: boolean;
-  createdAt?: Date;
-  updatedAt?: Date;
-}
-
+import { AuthUser } from '@/common/types/user.types';
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly authRepository: AuthRepository,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
@@ -57,10 +43,7 @@ export class AuthService {
    * @throws {ConflictException} If the email is already registered.
    */
   async register(dto: RegisterDto): Promise<AuthUser> {
-    const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-      select: { id: true },
-    });
+    const existing = await this.authRepository.findUserByEmail(dto.email);
 
     if (existing) {
       throw new ConflictException('Email already registered');
@@ -68,13 +51,10 @@ export class AuthService {
 
     const passwordHash = await this.hashingService.hash(dto.password);
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email,
-        name: dto.name,
-        passwordHash,
-      },
-      select: { id: true, email: true, name: true, role: true },
+    const user = await this.authRepository.createUser({
+      email: dto.email,
+      name: dto.name,
+      passwordHash,
     });
 
     // Fire-and-forget: welcome email failure must not block registration
@@ -97,21 +77,7 @@ export class AuthService {
     req: Request,
     res: Response,
   ): Promise<(AuthTokens & { user: AuthUser }) | TwoFactorRequiredResponse> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        passwordHash: true,
-        isActive: true,
-        isEmailVerified: true,
-        createdAt: true,
-        updatedAt: true,
-        isTwoFactorEnabled: true,
-      },
-    });
+    const user = await this.authRepository.findUserByEmail(dto.email);
 
     if (!user) {
       // Constant-time response to prevent user enumeration
@@ -162,7 +128,7 @@ export class AuthService {
    * @param res The response object to clear cookies.
    */
   async logout(tokenId: string, res: Response): Promise<void> {
-    await this.prisma.token.deleteMany({ where: { id: tokenId } });
+    await this.authRepository.deleteTokenById(tokenId);
     this.tokenService.clearRefreshCookie(res);
   }
 
@@ -175,15 +141,9 @@ export class AuthService {
    */
   async refresh(payload: JwtRefreshPayload, res: Response): Promise<AuthTokens> {
     // Mark old token as used (rotation)
-    await this.prisma.token.update({
-      where: { id: payload.tokenId },
-      data: { usedAt: new Date() },
-    });
+    await this.authRepository.markTokenAsUsed(payload.tokenId);
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: { id: true, email: true, role: true },
-    });
+    const user = await this.authRepository.findUserById(payload.sub);
 
     if (!user) throw new UnauthorizedException('User not found');
 
@@ -197,17 +157,7 @@ export class AuthService {
    * @throws {NotFoundException} If the user is not found.
    */
   async getCurrentUser(userId: string): Promise<AuthUser> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        isTwoFactorEnabled: true,
-        passwordHash: true,
-      },
-    });
+    const user = await this.authRepository.findUserById(userId);
 
     if (!user) throw new NotFoundException('User not found');
 
@@ -221,12 +171,18 @@ export class AuthService {
     };
   }
 
-  verifySession(
+  async verifySession(
     userId: string,
     email: string,
     role: Role,
     user: AuthUser,
-  ): AuthTokens & { user: AuthUser } {
+  ): Promise<AuthTokens & { user: AuthUser }> {
+    const dbUser = await this.authRepository.findUserById(userId);
+
+    if (!dbUser?.isActive) {
+      throw new UnauthorizedException('User not found or inactive');
+    }
+
     const accessPayload: JwtPayload = { sub: userId, email, role };
 
     const accessToken = this.jwtService.sign(accessPayload, {
@@ -250,68 +206,31 @@ export class AuthService {
   async loginWithOAuth(
     payload: OAuthUserPayload,
     req: Request,
-    res: Response,
-  ): Promise<(AuthTokens & { user: AuthUser }) | TwoFactorRequiredResponse> {
-    let user = await this.prisma.user.findUnique({
-      where: { email: payload.email },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        isActive: true,
-        isTwoFactorEnabled: true,
-        passwordHash: true,
-        oauthAccounts: {
-          where: {
-            provider: payload.provider,
-            providerId: payload.providerId,
-          },
-          select: { id: true },
-        },
-      },
-    });
+  ): Promise<{ auth_code: string } | TwoFactorRequiredResponse> {
+    let user = await this.authRepository.findUserByProviderId(payload.providerId, 'GOOGLE');
 
     if (user) {
       if (!user.isActive) {
         throw new UnauthorizedException('Account is disabled');
       }
-
-      // Link OAuth account if not already linked
-      if (user.oauthAccounts.length === 0) {
-        await this.prisma.oAuthAccount.create({
-          data: {
-            provider: payload.provider,
-            providerId: payload.providerId,
-            userId: user.id,
-          },
-        });
-      }
     } else {
-      // First time: create user + OAuth account
-      user = await this.prisma.user.create({
-        data: {
+      // Create user and link OAuth provider
+      const existingEmail = await this.authRepository.findUserByEmail(payload.email);
+
+      if (existingEmail) {
+        // Link to existing user by email
+        user = existingEmail;
+        await this.authRepository.linkOAuthProvider(user.id, 'GOOGLE', payload.providerId);
+      } else {
+        // First time: create user + OAuth account
+        user = await this.authRepository.createUserWithOAuth({
           email: payload.email,
           name: payload.name,
+          provider: 'GOOGLE',
+          providerId: payload.providerId,
           isEmailVerified: payload.isEmailVerified,
-          oauthAccounts: {
-            create: {
-              provider: payload.provider,
-              providerId: payload.providerId,
-            },
-          },
-        },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          role: true,
-          isActive: true,
-          isTwoFactorEnabled: true,
-          passwordHash: true,
-          oauthAccounts: { select: { id: true } },
-        },
-      });
+        });
+      }
     }
 
     if (user.isTwoFactorEnabled) {
@@ -320,6 +239,28 @@ export class AuthService {
       if (!isTrusted) {
         return this.twoFactorService.initiate(user.id, user.email, user.name);
       }
+    }
+
+    const authCode = randomUUID();
+    // Valid for 60 seconds
+    const expiresAt = new Date(Date.now() + 60_000);
+
+    await this.authRepository.createOAuthCode(user.id, authCode, expiresAt);
+
+    return { auth_code: authCode };
+  }
+
+  async exchangeOAuthCode(code: string, res: Response): Promise<AuthTokens & { user: AuthUser }> {
+    const tokenRecord = await this.authRepository.findAndDeleteOAuthCode(code);
+
+    if (!tokenRecord || tokenRecord.expiresAt < new Date()) {
+      throw new UnauthorizedException('Invalid or expired authorization code');
+    }
+
+    const user = await this.authRepository.findUserById(tokenRecord.userId);
+
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('User not found or inactive');
     }
 
     const tokens = await this.tokenService.issueTokenPair(user.id, user.email, user.role, res);
@@ -345,17 +286,7 @@ export class AuthService {
   ): Promise<AuthTokens & { user: AuthUser }> {
     const { userId } = await this.twoFactorService.verify(twoFactorToken, code);
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        isActive: true,
-        isTwoFactorEnabled: true,
-      },
-    });
+    const user = await this.authRepository.findUserById(userId);
 
     if (!user || !user.isActive) {
       throw new UnauthorizedException('User not found or inactive');
@@ -381,27 +312,18 @@ export class AuthService {
   async enableTwoFactor(userId: string, password: string): Promise<void> {
     await this.verifyPasswordForUser(userId, password);
 
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { isTwoFactorEnabled: true },
-    });
+    await this.authRepository.updateTwoFactor(userId, true);
   }
 
   async disableTwoFactor(userId: string, password: string, res: Response): Promise<void> {
     await this.verifyPasswordForUser(userId, password);
 
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { isTwoFactorEnabled: false },
-    });
+    await this.authRepository.updateTwoFactor(userId, false);
     await this.twoFactorService.revokeTrustedDevices(userId, res);
   }
 
   private async verifyPasswordForUser(userId: string, password: string): Promise<void> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { passwordHash: true },
-    });
+    const user = await this.authRepository.findUserById(userId);
 
     if (!user?.passwordHash) {
       throw new BadRequestException('Password confirmation is required');
