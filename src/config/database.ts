@@ -40,8 +40,8 @@ async function loadPgAdapter(url: string): Promise<SqlDriverAdapterFactory> {
       password: db.password,
       database: db.database,
     });
-  } catch (error) {
-    throw new Error(`Failed to initialize PostgreSQL adapter: ${(error as Error).message}`);
+  } catch {
+    throw new Error('Failed to initialize PostgreSQL adapter');
   }
 }
 
@@ -58,8 +58,8 @@ async function loadMariaDbAdapter(url: string): Promise<SqlDriverAdapterFactory>
       database: db.database,
       connectionLimit: 10,
     });
-  } catch (error) {
-    throw new Error(`Failed to initialize MariaDB adapter: ${(error as Error).message}`);
+  } catch {
+    throw new Error('Failed to initialize MariaDB adapter');
   }
 }
 

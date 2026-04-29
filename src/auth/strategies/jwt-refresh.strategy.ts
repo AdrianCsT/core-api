@@ -37,7 +37,11 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
     // Constant-time hash comparison of raw cookie vs JWT tokenId
     const hashed = createHash('sha256').update(rawToken).digest();
     const expected = Buffer.from(payload.tokenId, 'hex');
-    if (expected.length !== 32 || !timingSafeEqual(hashed, expected)) {
+    if (
+      hashed.length !== expected.length
+      || expected.length !== 32
+      || !timingSafeEqual(hashed, expected)
+    ) {
       throw new UnauthorizedException('Token mismatch');
     }
 
