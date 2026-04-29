@@ -16,6 +16,40 @@ const USER_SELECT = {
   updatedAt: true,
 } satisfies Prisma.UserSelect;
 
+function encodeCursor(id: string, createdAt: Date): string {
+  return Buffer.from(JSON.stringify({ id, createdAt: createdAt.toISOString() })).toString(
+    'base64url',
+  );
+}
+
+interface CursorPayload {
+  id: string;
+  createdAt: string;
+}
+
+function isCursorPayload(value: unknown): value is CursorPayload {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && 'id' in value
+    && 'createdAt' in value
+    && typeof (value as Record<string, unknown>).id === 'string'
+    && typeof (value as Record<string, unknown>).createdAt === 'string'
+  );
+}
+
+function decodeCursor(cursor: string): { id: string; createdAt: Date } | null {
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(cursor, 'base64url').toString());
+    if (isCursorPayload(parsed)) {
+      return { id: parsed.id, createdAt: new Date(parsed.createdAt) };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 @Injectable()
 export class UsersRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -23,17 +57,8 @@ export class UsersRepository {
   async findAll(query: UsersQueryDto): Promise<PaginatedUsers> {
     const { limit, cursor, search } = query;
 
-    // Resolve cursor UUID to createdAt for compound pagination
-    let cursorCreatedAt: Date | undefined;
-    if (cursor) {
-      const cursorUser = await this.prisma.user.findUnique({
-        where: { id: cursor },
-        select: { createdAt: true },
-      });
-      if (cursorUser) {
-        cursorCreatedAt = cursorUser.createdAt;
-      }
-    }
+    // Decode self-contained cursor — no extra DB query needed
+    const cursorData = cursor ? decodeCursor(cursor) : null;
 
     const conditions: Prisma.UserWhereInput[] = [{ deletedAt: null }];
 
@@ -43,11 +68,11 @@ export class UsersRepository {
       });
     }
 
-    if (cursorCreatedAt && cursor) {
+    if (cursorData) {
       conditions.push({
         OR: [
-          { createdAt: { lt: cursorCreatedAt } },
-          { createdAt: cursorCreatedAt, id: { lt: cursor } },
+          { createdAt: { lt: cursorData.createdAt } },
+          { createdAt: cursorData.createdAt, id: { lt: cursorData.id } },
         ],
       });
     }
@@ -76,7 +101,7 @@ export class UsersRepository {
 
     return {
       items: page,
-      nextCursor: hasNextPage ? (page.at(-1)?.id ?? null) : null,
+      nextCursor: hasNextPage ? encodeCursor(page.at(-1)!.id, page.at(-1)!.createdAt) : null,
       total,
     };
   }
