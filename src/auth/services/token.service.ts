@@ -50,18 +50,19 @@ export class TokenService {
     }
 
     // Persist SHA-256 hash of the refresh token
+    const hashedTokenId = hashToken(refreshToken);
     await this.prisma.token.create({
       data: {
-        token: hashToken(refreshToken),
+        token: hashedTokenId,
         type: TokenType.REFRESH,
         userId,
         expiresAt,
       },
     });
 
-    // Create a signed JWT that carries the tokenId for refresh strategy validation
+    // Create a signed JWT that carries the hashed tokenId for refresh strategy validation
     const refreshJwt = this.jwtService.sign(
-      { sub: userId, email, role, tokenId: refreshToken } as JwtRefreshPayload,
+      { sub: userId, email, role, tokenId: hashedTokenId } as JwtRefreshPayload,
       {
         secret: this.configService.getOrThrow<string>('jwt.refreshSecret'),
         expiresIn: refreshExpiresIn,

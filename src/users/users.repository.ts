@@ -23,12 +23,29 @@ export class UsersRepository {
   async findAll(query: UsersQueryDto): Promise<PaginatedUsers> {
     const { limit, cursor, search } = query;
 
+    // Resolve cursor UUID to createdAt for compound pagination
+    let cursorCreatedAt: Date | undefined;
+    if (cursor) {
+      const cursorUser = await this.prisma.user.findUnique({
+        where: { id: cursor },
+        select: { createdAt: true },
+      });
+      if (cursorUser) {
+        cursorCreatedAt = cursorUser.createdAt;
+      }
+    }
+
     const where: Prisma.UserWhereInput = {
       deletedAt: null,
       ...(search && {
         OR: [{ name: { contains: search } }, { email: { contains: search } }],
       }),
-      ...(cursor && { id: { lt: cursor } }),
+      ...(cursorCreatedAt && {
+        OR: [
+          { createdAt: { lt: cursorCreatedAt } },
+          { createdAt: cursorCreatedAt, id: { lt: cursor } },
+        ],
+      }),
     };
 
     const countWhere: Prisma.UserWhereInput = {
@@ -43,7 +60,7 @@ export class UsersRepository {
         where,
         select: USER_SELECT,
         take: limit + 1,
-        orderBy: { id: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       }),
       this.prisma.user.count({ where: countWhere }),
     ]);

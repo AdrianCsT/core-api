@@ -50,7 +50,7 @@ describe('JwtRefreshStrategy', () => {
       sub: 'user-1',
       email: 'test@example.com',
       role: Role.USER,
-      tokenId,
+      tokenId: hashedTokenId, // JWT now carries the hash, not the raw token
     };
 
     let mockRequest: Partial<Request>;

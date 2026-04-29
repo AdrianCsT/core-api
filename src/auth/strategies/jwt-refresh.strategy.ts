@@ -30,14 +30,14 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
       throw new UnauthorizedException('Refresh token missing');
     }
 
-    // Ensure cookie value matches the tokenId in the JWT
-    if (rawToken !== payload.tokenId) {
+    // Hash the raw cookie and compare with JWT tokenId (which is now the hash)
+    if (createHash('sha256').update(rawToken).digest('hex') !== payload.tokenId) {
       throw new UnauthorizedException('Token mismatch');
     }
 
-    const hashedTokenId = createHash('sha256').update(payload.tokenId).digest('hex');
+    // payload.tokenId is already a SHA-256 hash — use it directly for DB lookup
     const token = await this.prisma.token.findUnique({
-      where: { token: hashedTokenId },
+      where: { token: payload.tokenId },
       select: {
         id: true,
         usedAt: true,
