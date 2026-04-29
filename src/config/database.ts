@@ -1,4 +1,5 @@
 import type { SqlDriverAdapterFactory } from '@prisma/driver-adapter-utils';
+import { Logger } from '@nestjs/common';
 
 export type DBProvider = 'mysql' | 'postgres';
 
@@ -40,7 +41,8 @@ async function loadPgAdapter(url: string): Promise<SqlDriverAdapterFactory> {
       password: db.password,
       database: db.database,
     });
-  } catch {
+  } catch (error) {
+    Logger.error('Failed to initialize PostgreSQL adapter', error as Error);
     throw new Error('Failed to initialize PostgreSQL adapter');
   }
 }
@@ -58,7 +60,8 @@ async function loadMariaDbAdapter(url: string): Promise<SqlDriverAdapterFactory>
       database: db.database,
       connectionLimit: 10,
     });
-  } catch {
+  } catch (error) {
+    Logger.error('Failed to initialize MariaDB adapter', error as Error);
     throw new Error('Failed to initialize MariaDB adapter');
   }
 }
