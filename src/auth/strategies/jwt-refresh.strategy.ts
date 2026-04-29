@@ -30,10 +30,14 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
       throw new UnauthorizedException('Refresh token missing');
     }
 
+    if (!payload.tokenId) {
+      throw new UnauthorizedException('Invalid token payload');
+    }
+
     // Constant-time hash comparison of raw cookie vs JWT tokenId
     const hashed = createHash('sha256').update(rawToken).digest();
     const expected = Buffer.from(payload.tokenId, 'hex');
-    if (!timingSafeEqual(hashed, expected)) {
+    if (expected.length !== 32 || !timingSafeEqual(hashed, expected)) {
       throw new UnauthorizedException('Token mismatch');
     }
 
