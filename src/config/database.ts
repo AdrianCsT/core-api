@@ -29,30 +29,38 @@ export function detectProvider(url: string): DBProvider {
 }
 
 async function loadPgAdapter(url: string): Promise<SqlDriverAdapterFactory> {
-  const { PrismaPg } = await import('@prisma/adapter-pg');
-  const db = parseDatabaseUrl(url);
+  try {
+    const { PrismaPg } = await import('@prisma/adapter-pg');
+    const db = parseDatabaseUrl(url);
 
-  return new PrismaPg({
-    host: db.host,
-    port: db.port || 5432,
-    user: db.user,
-    password: db.password,
-    database: db.database,
-  });
+    return new PrismaPg({
+      host: db.host,
+      port: db.port || 5432,
+      user: db.user,
+      password: db.password,
+      database: db.database,
+    });
+  } catch (error) {
+    throw new Error(`Failed to initialize PostgreSQL adapter: ${(error as Error).message}`);
+  }
 }
 
 async function loadMariaDbAdapter(url: string): Promise<SqlDriverAdapterFactory> {
-  const { PrismaMariaDb } = await import('@prisma/adapter-mariadb');
-  const db = parseDatabaseUrl(url);
+  try {
+    const { PrismaMariaDb } = await import('@prisma/adapter-mariadb');
+    const db = parseDatabaseUrl(url);
 
-  return new PrismaMariaDb({
-    host: db.host,
-    port: db.port || 3306,
-    user: db.user,
-    password: db.password,
-    database: db.database,
-    connectionLimit: 10,
-  });
+    return new PrismaMariaDb({
+      host: db.host,
+      port: db.port || 3306,
+      user: db.user,
+      password: db.password,
+      database: db.database,
+      connectionLimit: 10,
+    });
+  } catch (error) {
+    throw new Error(`Failed to initialize MariaDB adapter: ${(error as Error).message}`);
+  }
 }
 
 export async function createAdapter(databaseUrl: string): Promise<SqlDriverAdapterFactory> {

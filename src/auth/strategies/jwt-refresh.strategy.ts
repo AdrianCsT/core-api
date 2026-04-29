@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
-import { createHash } from 'crypto';
+import { createHash, timingSafeEqual } from 'crypto';
 import { Request } from 'express';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '@/prisma';
@@ -30,8 +30,10 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
       throw new UnauthorizedException('Refresh token missing');
     }
 
-    // Hash the raw cookie and compare with JWT tokenId (which is now the hash)
-    if (createHash('sha256').update(rawToken).digest('hex') !== payload.tokenId) {
+    // Constant-time hash comparison of raw cookie vs JWT tokenId
+    const hashed = createHash('sha256').update(rawToken).digest();
+    const expected = Buffer.from(payload.tokenId, 'hex');
+    if (!timingSafeEqual(hashed, expected)) {
       throw new UnauthorizedException('Token mismatch');
     }
 

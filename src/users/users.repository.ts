@@ -35,18 +35,24 @@ export class UsersRepository {
       }
     }
 
-    const where: Prisma.UserWhereInput = {
-      deletedAt: null,
-      ...(search && {
+    const conditions: Prisma.UserWhereInput[] = [{ deletedAt: null }];
+
+    if (search) {
+      conditions.push({
         OR: [{ name: { contains: search } }, { email: { contains: search } }],
-      }),
-      ...(cursorCreatedAt && {
+      });
+    }
+
+    if (cursorCreatedAt) {
+      conditions.push({
         OR: [
           { createdAt: { lt: cursorCreatedAt } },
           { createdAt: cursorCreatedAt, id: { lt: cursor } },
         ],
-      }),
-    };
+      });
+    }
+
+    const where: Prisma.UserWhereInput = { AND: conditions };
 
     const countWhere: Prisma.UserWhereInput = {
       deletedAt: null,

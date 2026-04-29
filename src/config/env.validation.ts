@@ -113,7 +113,13 @@ export function validateEnv(config: Record<string, unknown>) {
   const errors = validateSync(validated, { skipMissingProperties: false });
 
   if (errors.length > 0) {
-    throw new Error(`Config validation error: ${errors.toString()}`);
+    const fields = errors
+      .map((e) => {
+        const constraints = e.constraints ? Object.keys(e.constraints).join(',') : '';
+        return constraints ? `${e.property}(${constraints})` : e.property;
+      })
+      .join(', ');
+    throw new Error(`Config validation error — invalid fields: ${fields}`);
   }
 
   return validated;
