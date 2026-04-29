@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
+import { createHash } from 'crypto';
 import { Request } from 'express';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '@/prisma';
@@ -29,8 +30,14 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
       throw new UnauthorizedException('Refresh token missing');
     }
 
+    // Ensure cookie value matches the tokenId in the JWT
+    if (rawToken !== payload.tokenId) {
+      throw new UnauthorizedException('Token mismatch');
+    }
+
+    const hashedTokenId = createHash('sha256').update(payload.tokenId).digest('hex');
     const token = await this.prisma.token.findUnique({
-      where: { token: payload.tokenId },
+      where: { token: hashedTokenId },
       select: {
         id: true,
         usedAt: true,
@@ -57,16 +64,10 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
     }
 
     if (token.usedAt !== null) {
-      const gracePeriodMs = 30 * 1000; // 30 seconds
-      const isWithinGracePeriod = Date.now() - token.usedAt.getTime() < gracePeriodMs;
-
-      if (!isWithinGracePeriod) {
-        // Token reuse detected — possible theft; revoke all tokens for this user
-        await this.prisma.token.deleteMany({
-          where: { userId: payload.sub },
-        });
-        throw new UnauthorizedException('Refresh token reuse detected. All sessions revoked.');
-      }
+      await this.prisma.token.deleteMany({
+        where: { userId: payload.sub },
+      });
+      throw new UnauthorizedException('Refresh token reuse detected. All sessions revoked.');
     }
 
     if (token.expiresAt < new Date()) {

@@ -28,6 +28,7 @@ export class UsersRepository {
       ...(search && {
         OR: [{ name: { contains: search } }, { email: { contains: search } }],
       }),
+      ...(cursor && { id: { lt: cursor } }),
     };
 
     const [items, total] = await this.prisma.$transaction([
@@ -35,7 +36,6 @@ export class UsersRepository {
         where,
         select: USER_SELECT,
         take: limit + 1,
-        ...(cursor && { cursor: { id: cursor }, skip: 1 }),
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.user.count({ where }),

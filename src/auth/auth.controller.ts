@@ -55,7 +55,7 @@ export class AuthController {
   async register(@Body() dto: RegisterDto): Promise<UserResponseDto> {
     const user = await this.authService.register(dto);
     return {
-      data: user as unknown as UserResponseDto['data'],
+      data: user,
       message: 'User registered successfully',
     };
   }
@@ -75,7 +75,7 @@ export class AuthController {
   ): Promise<LoginGenericResponseDto> {
     const result = await this.authService.login(dto, req, res);
     return {
-      data: result as unknown as LoginGenericResponseDto['data'],
+      data: result,
       message: 'Login successful',
     };
   }
@@ -146,7 +146,7 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Current user data' })
   async me(@CurrentUser() user: JwtRefreshPayload): Promise<UserResponseDto> {
     const currentUser = await this.authService.getCurrentUser(user.sub);
-    return { data: currentUser as unknown as UserResponseDto['data'] };
+    return { data: currentUser };
   }
 
   // POST /api/v1/auth/session
@@ -221,7 +221,7 @@ export class AuthController {
       res,
     );
     return {
-      data: result as unknown as LoginGenericResponseDto['data'],
+      data: result,
       message: 'Login successful',
     };
   }

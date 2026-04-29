@@ -1,5 +1,14 @@
-import { plainToInstance } from 'class-transformer';
-import { IsEnum, IsNumber, IsString, IsUrl, Max, Min, validateSync } from 'class-validator';
+import { plainToInstance, Transform } from 'class-transformer';
+import {
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Max,
+  Min,
+  validateSync,
+} from 'class-validator';
 
 enum NodeEnvironment {
   Development = 'development',
@@ -11,6 +20,11 @@ class EnvironmentVariables {
   @IsEnum(NodeEnvironment)
   NODE_ENV: NodeEnvironment = NodeEnvironment.Development;
 
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') return 3000;
+    return Number(value);
+  })
+  @IsOptional()
   @IsNumber()
   @Min(1)
   @Max(65535)

@@ -70,6 +70,7 @@
     "@types/express": "^5.0.0",
     "@types/handlebars": "^4.0.40",
     "@types/jest": "^30.0.0",
+    "@types/ms": "^2.1.0",
     "@types/node": "^22.19.17",
     "@types/nodemailer": "^8.0.0",
     "@types/passport-google-oauth20": "^2.0.17",

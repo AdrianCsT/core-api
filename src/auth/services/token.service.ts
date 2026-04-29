@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { Response } from 'express';
+import ms from 'ms';
 import type { StringValue } from 'ms';
 
 import { Role, TokenType } from '@/generated/prisma/enums';
@@ -14,6 +15,10 @@ export interface AuthTokens {
 }
 
 const REFRESH_COOKIE_NAME = 'refresh_token';
+
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
 
 @Injectable()
 export class TokenService {
@@ -43,11 +48,12 @@ export class TokenService {
     ) as StringValue;
 
     const expiresAt = this.parseExpiry(refreshExpiresIn);
+    const cookieMaxAge = ms(refreshExpiresIn);
 
-    // Persist the refresh token
+    // Persist SHA-256 hash of the refresh token
     await this.prisma.token.create({
       data: {
-        token: refreshToken,
+        token: hashToken(refreshToken),
         type: TokenType.REFRESH,
         userId,
         expiresAt,
@@ -63,15 +69,13 @@ export class TokenService {
       },
     );
 
-    this.setRefreshCookie(res, refreshJwt);
+    this.setRefreshCookie(res, refreshJwt, cookieMaxAge);
 
     return { access_token: accessToken };
   }
 
-  setRefreshCookie(res: Response, token: string): void {
+  setRefreshCookie(res: Response, token: string, maxAge: number): void {
     const isProd = this.configService.get<string>('app.nodeEnv') === 'production';
-    const expiresIn = this.configService.get<string>('jwt.refreshExpiresIn', '30d');
-    const maxAge = this.parseExpiry(expiresIn).getTime() - Date.now();
 
     res.cookie(REFRESH_COOKIE_NAME, token, {
       httpOnly: true,
@@ -89,17 +93,6 @@ export class TokenService {
   }
 
   parseExpiry(expiry: string): Date {
-    const unit = expiry.slice(-1);
-    const value = parseInt(expiry.slice(0, -1), 10);
-
-    const multipliers: Record<string, number> = {
-      s: 1000,
-      m: 60 * 1000,
-      h: 60 * 60 * 1000,
-      d: 24 * 60 * 60 * 1000,
-    };
-
-    const ms = (multipliers[unit] ?? 1000) * value;
-    return new Date(Date.now() + ms);
+    return new Date(Date.now() + ms(expiry as StringValue));
   }
 }

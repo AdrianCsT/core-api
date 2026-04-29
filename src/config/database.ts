@@ -3,16 +3,23 @@ import type { SqlDriverAdapterFactory } from '@prisma/driver-adapter-utils';
 export type DBProvider = 'mysql' | 'postgres';
 
 export function parseDatabaseUrl(url: string) {
-  const parsed = new URL(url);
+  try {
+    const parsed = new URL(url);
 
-  return {
-    protocol: parsed.protocol.replace(':', ''),
-    host: parsed.hostname,
-    port: Number(parsed.port),
-    user: decodeURIComponent(parsed.username),
-    password: decodeURIComponent(parsed.password),
-    database: parsed.pathname.replace('/', ''),
-  };
+    return {
+      protocol: parsed.protocol.replace(':', ''),
+      host: parsed.hostname,
+      port: Number(parsed.port) || undefined,
+      user: decodeURIComponent(parsed.username),
+      password: decodeURIComponent(parsed.password),
+      database: parsed.pathname.replace('/', ''),
+      connectionString: url,
+    };
+  } catch {
+    throw new Error(
+      'Invalid DATABASE_URL format. Expected: driver://user:password@host:port/database',
+    );
+  }
 }
 
 export function detectProvider(url: string): DBProvider {
@@ -24,8 +31,15 @@ export function detectProvider(url: string): DBProvider {
 
 async function loadPgAdapter(url: string): Promise<SqlDriverAdapterFactory> {
   const { PrismaPg } = await import('@prisma/adapter-pg');
+  const db = parseDatabaseUrl(url);
 
-  return new PrismaPg({ connectionString: url });
+  return new PrismaPg({
+    host: db.host,
+    port: db.port || 5432,
+    user: db.user,
+    password: db.password,
+    database: db.database,
+  });
 }
 
 async function loadMariaDbAdapter(url: string): Promise<SqlDriverAdapterFactory> {
